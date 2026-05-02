@@ -181,6 +181,7 @@
         <input type="date" class="date-input" id="sessionDate">
         <button class="btn btn-primary" onclick="loadAttendanceForDate()">📂 تحميل جلسة</button>
         <button class="btn btn-success" onclick="saveAttendance()">💾 حفظ الحضور</button>
+        <button type="button" class="btn btn-primary" style="background:#5a6d82" onclick="downloadSampleXlsx()">📄 نموذج Excel</button>
         <button class="btn btn-export" onclick="exportExcel()">⬇️ تصدير Excel</button>
       </div>
     </div>
@@ -372,6 +373,16 @@ async function loadAttendanceForDate() {
     if (all[d]) { attendance = all[d]; renderStudents(); updateStats(); showBanner('📂 تم تحميل الجلسة', 'success'); }
     else showBanner('⚠️ لا توجد بيانات لهذا التاريخ', '');
   } catch(e) { showBanner('❌ خطأ في الاتصال', 'error'); }
+}
+
+function downloadSampleXlsx() {
+  showBanner('⬇️ جاري تنزيل النموذج...', '');
+  const a = document.createElement('a');
+  a.href = API + '/sample-attendance-xlsx';
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => showBanner('✅ تم فتح التنزيل', 'success'), 600);
 }
 
 function exportExcel() {

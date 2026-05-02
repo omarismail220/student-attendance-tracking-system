@@ -31,6 +31,23 @@ STUDENTS = {
 
 attendance_store = {}
 
+# ملف Excel نموذجي: متغير البيئة ATTENDANCE_SAMPLE_XLSX، أو بجانب app.py، أو مسارك على PythonAnywhere
+PA_SAMPLE_XLSX_DEFAULT = "/home/omarismail220/sample_attendance_A1.xlsx"
+
+
+def resolve_sample_xlsx_path():
+    env = os.environ.get("ATTENDANCE_SAMPLE_XLSX", "").strip()
+    if env and os.path.isfile(env):
+        return env
+    base = os.path.dirname(os.path.abspath(__file__))
+    local = os.path.join(base, "sample_attendance_A1.xlsx")
+    if os.path.isfile(local):
+        return local
+    if os.path.isfile(PA_SAMPLE_XLSX_DEFAULT):
+        return PA_SAMPLE_XLSX_DEFAULT
+    return None
+
+
 @app.route('/')
 def index():
     return send_from_directory(os.path.dirname(os.path.abspath(__file__)), 'index.html')
@@ -38,13 +55,33 @@ def index():
 @app.route('/api/info', methods=['GET'])
 def api_info():
     """Public metadata + health check for the frontend."""
+    sample = resolve_sample_xlsx_path()
     return jsonify({
         "status": "ok",
         "service": "student-attendance-api",
         "version": "1.0.0",
         "groups_count": len(STUDENTS),
         "server_time": datetime.now().isoformat(timespec="seconds"),
+        "sample_xlsx_available": bool(sample),
     })
+
+
+@app.route('/api/sample-attendance-xlsx', methods=['GET'])
+def download_sample_attendance_xlsx():
+    path = resolve_sample_xlsx_path()
+    if not path:
+        return jsonify({
+            "error": "not_found",
+            "message": "ملف النموذج غير موجود على الخادم",
+            "hint": "ارفع sample_attendance_A1.xlsx أو عيّن ATTENDANCE_SAMPLE_XLSX في wsgi أو البيئة",
+            "default_pythonanywhere_path": PA_SAMPLE_XLSX_DEFAULT,
+        }), 404
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name="sample_attendance_A1.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 @app.route('/api/groups', methods=['GET'])
 def get_groups():
@@ -142,6 +179,41 @@ def export_attendance(group_id):
     wb.save(buf); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name=f"attendance_{group_id}_{date}.xlsx",
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+API_ENDPOINTS = [
+    "GET /api",
+    "GET /api/info",
+    "GET /api/groups",
+    "GET /api/students/<group_id>",
+    "POST /api/attendance",
+    "GET /api/attendance/<group_id>",
+    "GET /api/export/<group_id>",
+    "GET /api/sample-attendance-xlsx",
+    "GET /",
+]
+
+
+@app.route('/api', methods=['GET'])
+def api_index():
+    return jsonify({"service": "student-attendance-api", "endpoints": API_ENDPOINTS}), 200
+
+
+@app.errorhandler(404)
+def handle_404(exc):
+    if request.path.startswith('/api'):
+        return jsonify({
+            "error": "not_found",
+            "path": request.path,
+            "hint": "المسار غير معرّف. جرّب /api/info أو /api/groups. إن كان كل شيء 404 فحدّث ملف wsgi على PythonAnywhere.",
+            "endpoints": API_ENDPOINTS,
+        }), 404
+    return (
+        '<!DOCTYPE html><html><body dir="rtl" style="font-family:sans-serif;padding:2rem;">'
+        f'<h1>404</h1><p>المسار غير موجود: <code>{request.path}</code></p>'
+        '<p><a href="/">الصفحة الرئيسية</a> — <a href="/api/info">/api/info</a></p></body></html>'
+    ), 404
+
 
 if __name__ == '__main__':
     app.run(debug=False, port=5050)
