@@ -244,6 +244,7 @@ function setApiStatus(ok, label, titleText) {
 }
 
 async function bootApp() {
+  let infoOk = false;
   try {
     const info = await fetchApiInfo();
     setApiStatus(
@@ -251,17 +252,25 @@ async function bootApp() {
       'API متصل',
       `${info.service} v${info.version} · ${info.groups_count} مجموعات · ${info.server_time || ''}`
     );
-    await loadGroups();
-  } catch (e) {
-    setApiStatus(false, 'API غير متاح', String(e.message || e));
-    document.getElementById('groupsGrid').innerHTML = `<div style="grid-column:1/-1;background:#fff3cd;padding:20px;border-radius:10px;text-align:center;color:#856404;"><strong>⚠️ تعذر الاتصال بالخادم</strong><br><small>تعذر جلب <code>${API}/info</code> — تأكد من تشغيل الخادم وCORS.</small></div>`;
+    infoOk = true;
+  } catch (_) {
+    /* السيرفر بدون /info أو خطأ مؤقت — نكمل بـ /groups */
+  }
+  const groupsOk = await loadGroups();
+  if (groupsOk && !infoOk) {
+    setApiStatus(true, 'API متصل', 'عبر /groups (مسار /info غير متاح على الخادم)');
+  }
+  if (!groupsOk) {
+    setApiStatus(false, 'الخادم لا يستجيب', `افتح في المتصفح للتجربة: ${API}/groups`);
   }
 }
 
 async function loadGroups() {
   try {
     const res = await fetch(API + '/groups');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const groups = await res.json();
+    if (!Array.isArray(groups)) throw new Error('bad_json');
     document.getElementById('groupsGrid').innerHTML = groups.map(g => `
       <div class="group-card" id="gc-${g.id}" onclick="selectGroup('${g.id}', this)">
         <div class="group-id">${g.id}</div>
@@ -269,8 +278,10 @@ async function loadGroups() {
         <div class="group-time">&#x1F550; ${g.time}</div>
         <div class="group-count">${g.count} طالب</div>
       </div>`).join('');
-  } catch(e) {
-    document.getElementById('groupsGrid').innerHTML = `<div style="grid-column:1/-1;background:#fff3cd;padding:20px;border-radius:10px;text-align:center;color:#856404;"><strong>⚠️ تعذر الاتصال بالخادم</strong><br><small>تأكد من تشغيل: <code>python app.py</code></small></div>`;
+    return true;
+  } catch (e) {
+    document.getElementById('groupsGrid').innerHTML = `<div style="grid-column:1/-1;background:#fff3cd;padding:20px;border-radius:10px;text-align:center;color:#856404;"><strong>⚠️ تعذر الاتصال بالخادم</strong><br><small>تعذر جلب <code>${API}/groups</code><br>ارفع ملف <code>app.py</code> الكامل على <a href="${BACKEND_ORIGIN}" target="_blank" rel="noopener">PythonAnywhere</a> ثم <strong>Reload</strong> للويب أب. إن كان الرابط على Vercel مختلفاً عن المسموح، حدّث قائمة <code>origins</code> في CORS.</small></div>`;
+    return false;
   }
 }
 

@@ -1,15 +1,20 @@
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
-import json, io, os
+import json, io, os, re
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 app = Flask(__name__)
+# Vercel: أي نطاق فرعي *.vercel.app + الرابط الثابت + تطوير محلي
 CORS(
     app,
     origins=[
         "https://student-attendance-tracking-system-3un4pgeat.vercel.app",
+        "https://omarismail220.pythonanywhere.com",
+        "http://127.0.0.1:5050",
+        "http://localhost:5050",
+        re.compile(r"^https://[a-zA-Z0-9.-]+\.vercel\.app$"),
     ],
 )
 
