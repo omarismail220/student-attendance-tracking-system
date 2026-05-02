@@ -30,6 +30,17 @@ attendance_store = {}
 def index():
     return send_from_directory(os.path.dirname(os.path.abspath(__file__)), 'index.html')
 
+@app.route('/api/info', methods=['GET'])
+def api_info():
+    """Public metadata + health check for the frontend."""
+    return jsonify({
+        "status": "ok",
+        "service": "student-attendance-api",
+        "version": "1.0.0",
+        "groups_count": len(STUDENTS),
+        "server_time": datetime.now().isoformat(timespec="seconds"),
+    })
+
 @app.route('/api/groups', methods=['GET'])
 def get_groups():
     return jsonify([{"id":k,"label":v["label"],"time":v["time"],"count":len(v["students"])} for k,v in STUDENTS.items()])

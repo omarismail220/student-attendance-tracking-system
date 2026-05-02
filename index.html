@@ -61,7 +61,12 @@
   .header-brand { display: flex; align-items: center; gap: 12px; }
   .header-icon { font-size: 28px; }
   .header-title { font-size: 20px; font-weight: 700; }
+  .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .header-date { font-size: 13px; color: var(--accent2); font-weight: 600; background: rgba(255,255,255,0.1); padding: 6px 14px; border-radius: 20px; }
+  .header-api-status { font-size: 11px; font-weight: 700; padding: 5px 12px; border-radius: 20px; letter-spacing: 0.02em; }
+  .header-api-status.ok { background: rgba(29,209,161,0.22); color: #7bedc9; border: 1px solid rgba(29,209,161,0.35); }
+  .header-api-status.err { background: rgba(255,107,107,0.2); color: #ffc9c9; border: 1px solid rgba(255,107,107,0.35); }
+  .header-api-status[hidden] { display: none !important; }
 
   .container { max-width: 1200px; margin: 0 auto; padding: 28px 24px; }
   .section-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px; }
@@ -154,7 +159,10 @@
     <div class="header-icon">📋</div>
     <div class="header-title">نظام تسجيل الحضور</div>
   </div>
-  <div class="header-date" id="headerDate">-</div>
+  <div class="header-right">
+    <div class="header-date" id="headerDate">-</div>
+    <span id="apiStatus" class="header-api-status" hidden title="">—</span>
+  </div>
 </div>
 
 <div class="container">
@@ -219,6 +227,36 @@ let attendance = {};
 const today = new Date();
 document.getElementById('headerDate').textContent = today.toLocaleDateString('ar-EG', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
 document.getElementById('sessionDate').value = today.toISOString().split('T')[0];
+
+async function fetchApiInfo() {
+  const res = await fetch(API + '/info');
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function setApiStatus(ok, label, titleText) {
+  const el = document.getElementById('apiStatus');
+  if (!el) return;
+  el.hidden = false;
+  el.textContent = label;
+  el.className = 'header-api-status ' + (ok ? 'ok' : 'err');
+  el.title = titleText || '';
+}
+
+async function bootApp() {
+  try {
+    const info = await fetchApiInfo();
+    setApiStatus(
+      true,
+      'API متصل',
+      `${info.service} v${info.version} · ${info.groups_count} مجموعات · ${info.server_time || ''}`
+    );
+    await loadGroups();
+  } catch (e) {
+    setApiStatus(false, 'API غير متاح', String(e.message || e));
+    document.getElementById('groupsGrid').innerHTML = `<div style="grid-column:1/-1;background:#fff3cd;padding:20px;border-radius:10px;text-align:center;color:#856404;"><strong>⚠️ تعذر الاتصال بالخادم</strong><br><small>تعذر جلب <code>${API}/info</code> — تأكد من تشغيل الخادم وCORS.</small></div>`;
+  }
+}
 
 async function loadGroups() {
   try {
@@ -343,7 +381,7 @@ function showBanner(text, type) {
   b._t = setTimeout(() => b.classList.remove('show'), 3000);
 }
 
-loadGroups();
+bootApp();
 </script>
 </body>
 </html>
