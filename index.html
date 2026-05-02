@@ -201,9 +201,13 @@
 </div>
 
 <script>
-const API = (location.protocol === 'file:' || !location.origin || location.origin === 'null')
-  ? 'http://127.0.0.1:5050/api'
-  : (location.origin + '/api');
+/** Remote backend (PythonAnywhere). Local Flask: http://127.0.0.1:5050 or http://localhost:5050 */
+const REMOTE_BACKEND = 'https://omarismail220.pythonanywhere.com';
+const API =
+  (location.protocol === 'http:' || location.protocol === 'https:') &&
+  (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
+    ? `${location.origin}/api`
+    : `${REMOTE_BACKEND}/api`;
 let currentGroup = null;
 let currentStudents = [];
 let attendance = {};
