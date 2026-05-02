@@ -201,13 +201,17 @@
 </div>
 
 <script>
-/** Remote backend (PythonAnywhere). Local Flask: http://127.0.0.1:5050 or http://localhost:5050 */
-const REMOTE_BACKEND = 'https://omarismail220.pythonanywhere.com';
-const API =
+/** Backend: PythonAnywhere Flask. Frontend (Vercel) calls this URL — CORS in app.py must list the Vercel origin. */
+const BACKEND_ORIGIN = 'https://omarismail220.pythonanywhere.com';
+
+const isLocalDev =
   (location.protocol === 'http:' || location.protocol === 'https:') &&
-  (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
-    ? `${location.origin}/api`
-    : `${REMOTE_BACKEND}/api`;
+  (location.hostname === '127.0.0.1' || location.hostname === 'localhost');
+const isSameHostAsBackend = location.hostname === new URL(BACKEND_ORIGIN).hostname;
+
+const API = isLocalDev || isSameHostAsBackend
+  ? `${location.origin}/api`
+  : `${BACKEND_ORIGIN}/api`;
 let currentGroup = null;
 let currentStudents = [];
 let attendance = {};
