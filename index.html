@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام تسجيل الحضور</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #0d2137;
+    --blue: #1a3c5e;
+    --accent: #2e86de;
+    --accent2: #48dbfb;
+    --green: #1dd1a1;
+    --red: #ff6b6b;
+    --yellow: #feca57;
+    --bg: #f0f4f8;
+    --card: #ffffff;
+    --text: #1a2a3a;
+    --muted: #6b7a8d;
+    --border: #dde3ea;
+    --present: #c8f7c5;
+    --present-text: #1a7a1a;
+    --absent: #ffd6d6;
+    --absent-text: #cc0000;
+    --late: #fff3cd;
+    --late-text: #856404;
+    --radius: 12px;
+    --shadow: 0 4px 24px rgba(13,33,55,0.10);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Cairo', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; direction: rtl; display: flex; flex-direction: column; position: relative; }
+
+  .watermark-layer { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
+  .watermark-layer .wm-text {
+    position: absolute; top: 42%; left: 50%;
+    transform: translate(-50%, -50%) rotate(-26deg);
+    font-size: clamp(28px, 7vw, 56px); font-weight: 900; color: var(--navy);
+    opacity: 0.04; white-space: nowrap; user-select: none;
+    text-shadow: 0 0 1px rgba(255,255,255,0.5);
+  }
+
+  .main-wrap { position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; }
+
+  .site-footer {
+    position: relative; z-index: 2;
+    margin-top: auto;
+    padding: 18px 20px 26px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(240,244,248,0.92) 0%, rgba(255,255,255,0.95) 100%);
+    line-height: 1.7;
+  }
+  .site-footer .footer-line { margin: 0; }
+  .site-footer .footer-name { font-weight: 700; color: var(--blue); letter-spacing: 0.02em; }
+  .site-footer .footer-copy { font-size: 11px; opacity: 0.9; }
+
+  .header { background: linear-gradient(135deg, var(--navy) 0%, var(--blue) 100%); color: white; padding: 0 32px; height: 70px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 16px rgba(0,0,0,0.2); position: sticky; top: 0; z-index: 100; }
+  .header-brand { display: flex; align-items: center; gap: 12px; }
+  .header-icon { font-size: 28px; }
+  .header-title { font-size: 20px; font-weight: 700; }
+  .header-date { font-size: 13px; color: var(--accent2); font-weight: 600; background: rgba(255,255,255,0.1); padding: 6px 14px; border-radius: 20px; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 28px 24px; }
+  .section-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px; }
+
+  .groups-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .group-card { background: var(--card); border: 2px solid var(--border); border-radius: var(--radius); padding: 18px 20px; cursor: pointer; transition: all 0.2s ease; box-shadow: var(--shadow); position: relative; overflow: hidden; }
+  .group-card::before { content: ''; position: absolute; top: 0; right: 0; width: 4px; height: 100%; background: var(--accent); transform: scaleY(0); transition: transform 0.2s ease; border-radius: 0 var(--radius) var(--radius) 0; }
+  .group-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 28px rgba(46,134,222,0.15); }
+  .group-card:hover::before { transform: scaleY(1); }
+  .group-card.active { border-color: var(--accent); background: linear-gradient(135deg, #eef4fd 0%, #dbeafe 100%); }
+  .group-card.active::before { transform: scaleY(1); }
+  .group-id { font-size: 22px; font-weight: 900; color: var(--accent); line-height: 1; }
+  .group-name { font-size: 13px; font-weight: 600; color: var(--text); margin-top: 4px; }
+  .group-time { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .group-count { font-size: 11px; font-weight: 600; color: var(--accent); background: rgba(46,134,222,0.1); padding: 3px 10px; border-radius: 20px; display: inline-block; margin-top: 8px; }
+
+  .attendance-panel { display: none; }
+  .attendance-panel.visible { display: block; }
+
+  .panel-header { background: var(--card); border-radius: var(--radius); padding: 22px 26px; box-shadow: var(--shadow); margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+  .panel-info h2 { font-size: 22px; font-weight: 800; color: var(--navy); }
+  .panel-info p { font-size: 13px; color: var(--muted); margin-top: 3px; }
+  .panel-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  .date-input { border: 2px solid var(--border); border-radius: 8px; padding: 8px 14px; font-family: 'Cairo', sans-serif; font-size: 14px; color: var(--text); background: var(--bg); cursor: pointer; transition: border-color 0.2s; }
+  .date-input:focus { outline: none; border-color: var(--accent); }
+
+  .btn { padding: 10px 20px; border-radius: 8px; font-family: 'Cairo', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; border: none; transition: all 0.2s ease; display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: #1a75c8; box-shadow: 0 4px 14px rgba(46,134,222,0.4); }
+  .btn-success { background: var(--green); color: white; }
+  .btn-success:hover { background: #17b89a; }
+  .btn-export { background: linear-gradient(135deg, #1a3c5e, #2e86de); color: white; }
+  .btn-export:hover { box-shadow: 0 4px 16px rgba(46,134,222,0.5); }
+  .btn-sm { padding: 6px 14px; font-size: 12px; }
+
+  .quick-actions { background: var(--card); border-radius: var(--radius); padding: 16px 22px; box-shadow: var(--shadow); margin-bottom: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .quick-label { font-size: 13px; font-weight: 700; color: var(--muted); }
+  .btn-all-present { background: var(--present); color: var(--present-text); font-size: 13px; border: none; }
+  .btn-all-absent { background: var(--absent); color: var(--absent-text); font-size: 13px; border: none; }
+  .btn-clear { background: var(--bg); color: var(--muted); font-size: 13px; border: 1px solid var(--border); }
+
+  .stats-bar { display: flex; gap: 14px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat-pill { background: var(--card); border-radius: 30px; padding: 8px 18px; font-size: 13px; font-weight: 700; box-shadow: var(--shadow); display: flex; align-items: center; gap: 8px; }
+  .stat-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot-present { background: var(--green); }
+  .dot-absent { background: var(--red); }
+  .dot-late { background: var(--yellow); }
+  .dot-unmarked { background: var(--muted); }
+
+  .students-list { display: flex; flex-direction: column; gap: 8px; }
+  .student-row { background: var(--card); border-radius: 10px; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border: 2px solid transparent; transition: all 0.2s ease; gap: 12px; }
+  .student-row:hover { border-color: var(--border); }
+  .student-row.status-present { border-color: #a8f0a4; background: linear-gradient(to left, var(--present), white 60%); }
+  .student-row.status-absent { border-color: #ffb8b8; background: linear-gradient(to left, var(--absent), white 60%); }
+  .student-row.status-late { border-color: #ffe599; background: linear-gradient(to left, var(--late), white 60%); }
+  .student-left { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; }
+  .student-num { width: 32px; height: 32px; border-radius: 50%; background: var(--bg); color: var(--muted); font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .student-name { font-size: 15px; font-weight: 600; color: var(--text); }
+  .status-buttons { display: flex; gap: 6px; flex-shrink: 0; }
+  .status-btn { padding: 7px 14px; border-radius: 6px; font-family: 'Cairo', sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; border: 2px solid transparent; transition: all 0.15s ease; background: var(--bg); color: var(--muted); }
+  .status-btn:hover { transform: scale(1.05); }
+  .status-btn.active-present { background: var(--present); color: var(--present-text); border-color: #4caf50; }
+  .status-btn.active-absent { background: var(--absent); color: var(--absent-text); border-color: #f44336; }
+  .status-btn.active-late { background: var(--late); color: var(--late-text); border-color: #ff9800; }
+
+  .save-banner { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px); background: var(--navy); color: white; padding: 14px 28px; border-radius: 30px; font-size: 15px; font-weight: 700; box-shadow: 0 8px 32px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 10px; z-index: 999; transition: transform 0.3s ease; }
+  .save-banner.show { transform: translateX(-50%) translateY(0); }
+  .save-banner.success { background: #1a7a1a; }
+  .save-banner.error { background: #cc0000; }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty-state-icon { font-size: 60px; margin-bottom: 16px; }
+  .empty-state h3 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+  .loading { text-align: center; padding: 40px; color: var(--muted); font-size: 16px; }
+  .spinner { display: inline-block; width: 30px; height: 30px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (max-width: 640px) { .container { padding: 16px; } .header { padding: 0 16px; } .panel-header { flex-direction: column; align-items: flex-start; } .student-name { font-size: 13px; } .status-btn { padding: 6px 10px; font-size: 11px; } .groups-grid { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+
+<div class="watermark-layer" aria-hidden="true"><span class="wm-text">Omar Ismail Helmy — د. كريم نصر</span></div>
+
+<div class="main-wrap">
+
+<div class="header">
+  <div class="header-brand">
+    <div class="header-icon">📋</div>
+    <div class="header-title">نظام تسجيل الحضور</div>
+  </div>
+  <div class="header-date" id="headerDate">-</div>
+</div>
+
+<div class="container">
+  <div class="section-label">اختر المجموعة</div>
+  <div class="groups-grid" id="groupsGrid">
+    <div class="loading"><div class="spinner"></div><br>جاري التحميل...</div>
+  </div>
+
+  <div class="attendance-panel" id="attendancePanel">
+    <div class="panel-header">
+      <div class="panel-info">
+        <h2 id="panelTitle">-</h2>
+        <p id="panelSubtitle">-</p>
+      </div>
+      <div class="panel-actions">
+        <input type="date" class="date-input" id="sessionDate">
+        <button class="btn btn-primary" onclick="loadAttendanceForDate()">📂 تحميل جلسة</button>
+        <button class="btn btn-success" onclick="saveAttendance()">💾 حفظ الحضور</button>
+        <button class="btn btn-export" onclick="exportExcel()">⬇️ تصدير Excel</button>
+      </div>
+    </div>
+
+    <div class="quick-actions">
+      <span class="quick-label">تحديد سريع:</span>
+      <button class="btn btn-sm btn-all-present" onclick="markAll('حاضر')">✅ الكل حاضر</button>
+      <button class="btn btn-sm btn-all-absent" onclick="markAll('غائب')">❌ الكل غائب</button>
+      <button class="btn btn-sm btn-clear" onclick="markAll('')">🔄 مسح الكل</button>
+    </div>
+
+    <div class="stats-bar" id="statsBar"></div>
+    <div class="students-list" id="studentsList"></div>
+  </div>
+</div>
+
+</div>
+
+<footer class="site-footer">
+  <p class="footer-line footer-copy">© تم الإنشاء بواسطة <span class="footer-name">Omar Ismail Helmy</span></p>
+  <p class="footer-line footer-copy">تحت إشراف <span class="footer-name">د. كريم نصر</span></p>
+</footer>
+
+<div class="save-banner" id="saveBanner">
+  <span id="bannerText">-</span>
+</div>
+
+<script>
+const API = (location.protocol === 'file:' || !location.origin || location.origin === 'null')
+  ? 'http://127.0.0.1:5050/api'
+  : (location.origin + '/api');
+let currentGroup = null;
+let currentStudents = [];
+let attendance = {};
+
+const today = new Date();
+document.getElementById('headerDate').textContent = today.toLocaleDateString('ar-EG', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+document.getElementById('sessionDate').value = today.toISOString().split('T')[0];
+
+async function loadGroups() {
+  try {
+    const res = await fetch(API + '/groups');
+    const groups = await res.json();
+    document.getElementById('groupsGrid').innerHTML = groups.map(g => `
+      <div class="group-card" id="gc-${g.id}" onclick="selectGroup('${g.id}', this)">
+        <div class="group-id">${g.id}</div>
+        <div class="group-name">${g.label}</div>
+        <div class="group-time">&#x1F550; ${g.time}</div>
+        <div class="group-count">${g.count} طالب</div>
+      </div>`).join('');
+  } catch(e) {
+    document.getElementById('groupsGrid').innerHTML = `<div style="grid-column:1/-1;background:#fff3cd;padding:20px;border-radius:10px;text-align:center;color:#856404;"><strong>⚠️ تعذر الاتصال بالخادم</strong><br><small>تأكد من تشغيل: <code>python app.py</code></small></div>`;
+  }
+}
+
+async function selectGroup(groupId, el) {
+  document.querySelectorAll('.group-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  currentGroup = groupId;
+  attendance = {};
+  const panel = document.getElementById('attendancePanel');
+  panel.classList.add('visible');
+  document.getElementById('studentsList').innerHTML = '<div class="loading"><div class="spinner"></div><br>جاري التحميل...</div>';
+  try {
+    const res = await fetch(API + '/students/' + groupId);
+    const data = await res.json();
+    currentStudents = data.students;
+    document.getElementById('panelTitle').textContent = data.label;
+    document.getElementById('panelSubtitle').textContent = data.students.length + ' طالب | توقيت: ' + data.time;
+    renderStudents();
+    updateStats();
+    panel.scrollIntoView({behavior:'smooth', block:'start'});
+  } catch(e) {
+    document.getElementById('studentsList').innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>خطأ في تحميل البيانات</h3></div>';
+  }
+}
+
+function renderStudents() {
+  document.getElementById('studentsList').innerHTML = currentStudents.map((name, i) => {
+    const s = attendance[name] || '';
+    const rc = s === 'حاضر' ? 'status-present' : s === 'غائب' ? 'status-absent' : s === 'متاخر' ? 'status-late' : '';
+    return `<div class="student-row ${rc}" id="row-${i}">
+      <div class="student-left"><div class="student-num">${i+1}</div><div class="student-name">${name}</div></div>
+      <div class="status-buttons">
+        <button class="status-btn ${s==='حاضر'?'active-present':''}" onclick="setStatus(${i},'حاضر')">✅ حاضر</button>
+        <button class="status-btn ${s==='غائب'?'active-absent':''}" onclick="setStatus(${i},'غائب')">❌ غائب</button>
+        <button class="status-btn ${s==='متاخر'?'active-late':''}" onclick="setStatus(${i},'متاخر')">⏰ متأخر</button>
+      </div></div>`;
+  }).join('');
+}
+
+function setStatus(idx, status) {
+  const name = currentStudents[idx];
+  attendance[name] = attendance[name] === status ? '' : status;
+  const row = document.getElementById('row-' + idx);
+  const s = attendance[name];
+  row.className = 'student-row' + (s==='حاضر'?' status-present':s==='غائب'?' status-absent':s==='متاخر'?' status-late':'');
+  const btns = row.querySelectorAll('.status-btn');
+  btns[0].className = 'status-btn ' + (s==='حاضر'?'active-present':'');
+  btns[1].className = 'status-btn ' + (s==='غائب'?'active-absent':'');
+  btns[2].className = 'status-btn ' + (s==='متاخر'?'active-late':'');
+  updateStats();
+}
+
+function markAll(status) {
+  currentStudents.forEach(n => { attendance[n] = status; });
+  renderStudents(); updateStats();
+}
+
+function updateStats() {
+  const p = currentStudents.filter(n => attendance[n]==='حاضر').length;
+  const a = currentStudents.filter(n => attendance[n]==='غائب').length;
+  const l = currentStudents.filter(n => attendance[n]==='متاخر').length;
+  const u = currentStudents.filter(n => !attendance[n]).length;
+  document.getElementById('statsBar').innerHTML = `
+    <div class="stat-pill"><div class="stat-dot dot-present"></div> حاضر: <strong>${p}</strong></div>
+    <div class="stat-pill"><div class="stat-dot dot-absent"></div> غائب: <strong>${a}</strong></div>
+    <div class="stat-pill"><div class="stat-dot dot-late"></div> متأخر: <strong>${l}</strong></div>
+    <div class="stat-pill"><div class="stat-dot dot-unmarked"></div> لم يسجل: <strong>${u}</strong></div>`;
+}
+
+async function saveAttendance() {
+  if (!currentGroup) return;
+  showBanner('💾 جاري الحفظ...', '');
+  try {
+    const res = await fetch(API + '/attendance', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({group_id: currentGroup, date: document.getElementById('sessionDate').value, records: attendance})
+    });
+    showBanner(res.ok ? '✅ تم الحفظ بنجاح!' : '❌ فشل الحفظ', res.ok ? 'success' : 'error');
+  } catch(e) { showBanner('❌ خطأ في الاتصال بالخادم', 'error'); }
+}
+
+async function loadAttendanceForDate() {
+  if (!currentGroup) return;
+  try {
+    const res = await fetch(API + '/attendance/' + currentGroup);
+    const all = await res.json();
+    const d = document.getElementById('sessionDate').value;
+    if (all[d]) { attendance = all[d]; renderStudents(); updateStats(); showBanner('📂 تم تحميل الجلسة', 'success'); }
+    else showBanner('⚠️ لا توجد بيانات لهذا التاريخ', '');
+  } catch(e) { showBanner('❌ خطأ في الاتصال', 'error'); }
+}
+
+function exportExcel() {
+  if (!currentGroup) return;
+  showBanner('⬇️ جاري التصدير...', '');
+  const a = document.createElement('a');
+  a.href = API + '/export/' + currentGroup;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => showBanner('✅ تم تصدير الملف!', 'success'), 800);
+}
+
+function showBanner(text, type) {
+  const b = document.getElementById('saveBanner');
+  b.className = 'save-banner ' + type;
+  document.getElementById('bannerText').textContent = text;
+  b.classList.add('show');
+  clearTimeout(b._t);
+  b._t = setTimeout(() => b.classList.remove('show'), 3000);
+}
+
+loadGroups();
+</script>
+</body>
+</html>
