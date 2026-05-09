@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Optionally set backend origin when front-end is hosted elsewhere:
+     <meta name="api-origin" content="https://your-api.example.com">
+-->
 <title>نظام تسجيل الحضور</title>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap" rel="stylesheet">
 <style>
@@ -102,7 +105,12 @@
   .btn-success:hover { background: #17b89a; }
   .btn-export { background: linear-gradient(135deg, #1a3c5e, #2e86de); color: white; }
   .btn-export:hover { box-shadow: 0 4px 16px rgba(46,134,222,0.5); }
+  .btn-outline { background: white; color: var(--accent); border: 2px solid var(--accent); box-shadow: none; }
+  .btn-outline:hover { background: rgba(46,134,222,0.08); box-shadow: 0 4px 12px rgba(46,134,222,0.2); }
+  .btn-upload { background: linear-gradient(135deg, #0d9488, #14b8a6); color: white; border: none; }
+  .btn-upload:hover { box-shadow: 0 4px 16px rgba(20,184,166,0.45); }
   .btn-sm { padding: 6px 14px; font-size: 12px; }
+  .visually-hidden-file { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
   .quick-actions { background: var(--card); border-radius: var(--radius); padding: 16px 22px; box-shadow: var(--shadow); margin-bottom: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .quick-label { font-size: 13px; font-weight: 700; color: var(--muted); }
@@ -181,8 +189,11 @@
         <input type="date" class="date-input" id="sessionDate">
         <button class="btn btn-primary" onclick="loadAttendanceForDate()">📂 تحميل جلسة</button>
         <button class="btn btn-success" onclick="saveAttendance()">💾 حفظ الحضور</button>
+        <button type="button" class="btn btn-outline" onclick="downloadStudentTemplate()" title="تنزيل قالب بتنسيق العربية وحقول جاهزة">📥 تنزيل قالب الطلاب</button>
+        <button type="button" class="btn btn-upload" onclick="pickStudentExcel()">📤 رفع قائمة الطلاب (Excel)</button>
         <button type="button" class="btn btn-primary" style="background:#5a6d82" onclick="downloadSampleXlsx()">📄 نموذج Excel</button>
         <button class="btn btn-export" onclick="exportExcel()">⬇️ تصدير Excel</button>
+        <input type="file" id="excelStudentsFile" class="visually-hidden-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-hidden="true" tabindex="-1" onchange="handleStudentExcel(this.files)">
       </div>
     </div>
 
@@ -210,200 +221,315 @@
 </div>
 
 <script>
-/** Backend: PythonAnywhere Flask. Frontend (Vercel) calls this URL — CORS in app.py must list the Vercel origin. */
-const BACKEND_ORIGIN = 'https://omarismail220.pythonanywhere.com';
-
-const isLocalDev =
-  (location.protocol === 'http:' || location.protocol === 'https:') &&
-  (location.hostname === '127.0.0.1' || location.hostname === 'localhost');
-const isSameHostAsBackend = location.hostname === new URL(BACKEND_ORIGIN).hostname;
-
-const API = isLocalDev || isSameHostAsBackend
-  ? `${location.origin}/api`
-  : `${BACKEND_ORIGIN}/api`;
-let currentGroup = null;
-let currentStudents = [];
-let attendance = {};
-
-const today = new Date();
-document.getElementById('headerDate').textContent = today.toLocaleDateString('ar-EG', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
-document.getElementById('sessionDate').value = today.toISOString().split('T')[0];
-
-async function fetchApiInfo() {
-  const res = await fetch(API + '/info');
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
-}
-
-function setApiStatus(ok, label, titleText) {
-  const el = document.getElementById('apiStatus');
-  if (!el) return;
-  el.hidden = false;
-  el.textContent = label;
-  el.className = 'header-api-status ' + (ok ? 'ok' : 'err');
-  el.title = titleText || '';
-}
-
-async function bootApp() {
-  let infoOk = false;
-  try {
-    const info = await fetchApiInfo();
-    setApiStatus(
-      true,
-      'API متصل',
-      `${info.service} v${info.version} · ${info.groups_count} مجموعات · ${info.server_time || ''}`
-    );
-    infoOk = true;
-  } catch (_) {
-    /* السيرفر بدون /info أو خطأ مؤقت — نكمل بـ /groups */
+  // API base: local dev uses Flask :5050; hosted on Vercel uses backend on PythonAnywhere.
+  function apiOrigin() {
+    const meta = document.querySelector('meta[name="api-origin"]');
+    if (meta && meta.content && meta.content.trim())
+      return meta.content.trim().replace(/\/+$/, '');
+    const h = (typeof location !== 'undefined' && location.hostname) || '';
+    if (h === 'localhost' || h === '127.0.0.1')
+      return 'http://127.0.0.1:5050';
+    return 'https://omarismail220.pythonanywhere.com';
   }
-  const groupsOk = await loadGroups();
-  if (groupsOk && !infoOk) {
-    setApiStatus(true, 'API متصل', 'عبر /groups (مسار /info غير متاح على الخادم)');
-  }
-  if (!groupsOk) {
-    setApiStatus(false, 'الخادم لا يستجيب', `افتح في المتصفح للتجربة: ${API}/groups`);
-  }
-}
+  const API = apiOrigin() + '/api';
 
-async function loadGroups() {
-  try {
-    const res = await fetch(API + '/groups');
+  let currentGroup = null;
+  let currentStudents = [];
+  let attendance = {};
+
+  const today = new Date();
+  document.getElementById('headerDate').textContent = today.toLocaleDateString('ar-EG', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  document.getElementById('sessionDate').value = today.toISOString().split('T')[0];
+
+  async function fetchApiInfo() {
+    const res = await fetch(API + '/info');
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const groups = await res.json();
-    if (!Array.isArray(groups)) throw new Error('bad_json');
-    document.getElementById('groupsGrid').innerHTML = groups.map(g => `
-      <div class="group-card" id="gc-${g.id}" onclick="selectGroup('${g.id}', this)">
-        <div class="group-id">${g.id}</div>
-        <div class="group-name">${g.label}</div>
-        <div class="group-time">&#x1F550; ${g.time}</div>
-        <div class="group-count">${g.count} طالب</div>
-      </div>`).join('');
-    return true;
-  } catch (e) {
-    document.getElementById('groupsGrid').innerHTML = `<div style="grid-column:1/-1;background:#fff3cd;padding:20px;border-radius:10px;text-align:center;color:#856404;"><strong>⚠️ تعذر الاتصال بالخادم</strong><br><small>تعذر جلب <code>${API}/groups</code><br>ارفع ملف <code>app.py</code> الكامل على <a href="${BACKEND_ORIGIN}" target="_blank" rel="noopener">PythonAnywhere</a> ثم <strong>Reload</strong> للويب أب. إن كان الرابط على Vercel مختلفاً عن المسموح، حدّث قائمة <code>origins</code> في CORS.</small></div>`;
-    return false;
+    return res.json();
   }
-}
 
-async function selectGroup(groupId, el) {
-  document.querySelectorAll('.group-card').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
-  currentGroup = groupId;
-  attendance = {};
-  const panel = document.getElementById('attendancePanel');
-  panel.classList.add('visible');
-  document.getElementById('studentsList').innerHTML = '<div class="loading"><div class="spinner"></div><br>جاري التحميل...</div>';
-  try {
-    const res = await fetch(API + '/students/' + groupId);
+  function setApiStatus(ok, label, titleText) {
+    const el = document.getElementById('apiStatus');
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = label;
+    el.className = 'header-api-status ' + (ok ? 'ok' : 'err');
+    el.title = titleText || '';
+  }
+
+  async function bootApp() {
+    let infoOk = false;
+    try {
+      const info = await fetchApiInfo();
+      setApiStatus(
+        true,
+        'API متصل',
+        `${info.service} v${info.version} · ${info.groups_count} مجموعات · ${info.server_time || ''}`
+      );
+      infoOk = true;
+    } catch (_) {
+      /* /info غير متاح أو خطأ مؤقت — نكمل بـ /groups */
+    }
+    const groupsOk = await loadGroups();
+    if (groupsOk && !infoOk) {
+      setApiStatus(true, 'API متصل', 'عبر /groups');
+    }
+    if (!groupsOk) {
+      setApiStatus(false, 'الخادم لا يستجيب', `تأكد أن Flask يعمل على http://127.0.0.1:5050 — شغّل: python app.py`);
+    }
+  }
+
+  async function loadGroups() {
+    try {
+      const res = await fetch(API + '/groups');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const groups = await res.json();
+      if (!Array.isArray(groups)) throw new Error('bad_json');
+      document.getElementById('groupsGrid').innerHTML = groups.map(g => `
+        <div class="group-card" id="gc-${g.id}" onclick="selectGroup('${g.id}', this)">
+          <div class="group-id">${g.id}</div>
+          <div class="group-name">${g.label}</div>
+          <div class="group-time">&#x1F550; ${g.time}</div>
+          <div class="group-count">${g.count} طالب</div>
+        </div>`).join('');
+      return true;
+    } catch (e) {
+      document.getElementById('groupsGrid').innerHTML = `
+        <div style="grid-column:1/-1;background:#fff3cd;padding:20px;border-radius:10px;text-align:center;color:#856404;">
+          <strong>⚠️ تعذر الاتصال بالخادم المحلي</strong><br>
+          <small>
+            تأكد أن Flask يعمل. افتح Terminal وشغّل:<br>
+            <code style="background:#f8f4e0;padding:4px 10px;border-radius:4px;display:inline-block;margin:8px 0;">python app.py</code><br>
+            ثم أعِد تحميل هذه الصفحة.
+          </small>
+        </div>`;
+      return false;
+    }
+  }
+
+  async function fetchStudentsPayload(groupId) {
+    const res = await fetch(API + '/students/' + encodeURIComponent(groupId));
+    if (!res.ok) {
+      let msg = res.status === 404 ? 'المجموعة غير موجودة' : ('HTTP ' + res.status);
+      try {
+        const j = await res.json();
+        if (j.message) msg = j.message;
+      } catch (_) { /* ignore */ }
+      throw new Error(msg);
+    }
     const data = await res.json();
-    currentStudents = data.students;
-    document.getElementById('panelTitle').textContent = data.label;
-    document.getElementById('panelSubtitle').textContent = data.students.length + ' طالب | توقيت: ' + data.time;
-    renderStudents();
-    updateStats();
-    panel.scrollIntoView({behavior:'smooth', block:'start'});
-  } catch(e) {
-    document.getElementById('studentsList').innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>خطأ في تحميل البيانات</h3></div>';
+    if (!Array.isArray(data.students)) throw new Error('استجابة غير متوقعة');
+    return data;
   }
-}
 
-function renderStudents() {
-  document.getElementById('studentsList').innerHTML = currentStudents.map((name, i) => {
-    const s = attendance[name] || '';
-    const rc = s === 'حاضر' ? 'status-present' : s === 'غائب' ? 'status-absent' : s === 'متاخر' ? 'status-late' : '';
-    return `<div class="student-row ${rc}" id="row-${i}">
-      <div class="student-left"><div class="student-num">${i+1}</div><div class="student-name">${name}</div></div>
-      <div class="status-buttons">
-        <button class="status-btn ${s==='حاضر'?'active-present':''}" onclick="setStatus(${i},'حاضر')">✅ حاضر</button>
-        <button class="status-btn ${s==='غائب'?'active-absent':''}" onclick="setStatus(${i},'غائب')">❌ غائب</button>
-        <button class="status-btn ${s==='متاخر'?'active-late':''}" onclick="setStatus(${i},'متاخر')">⏰ متأخر</button>
-      </div></div>`;
-  }).join('');
-}
+  /**
+   * Re-fetch roster from API for the selected group — used after Excel import succeeds.
+   */
+  async function reloadStudentsForCurrentGroup() {
+    if (!currentGroup) return false;
+    const panel = document.getElementById('attendancePanel');
+    document.getElementById('studentsList').innerHTML = '<div class="loading"><div class="spinner"></div><br>جاري التحديث...</div>';
+    try {
+      const data = await fetchStudentsPayload(currentGroup);
+      currentStudents = data.students;
+      document.getElementById('panelTitle').textContent = data.label;
+      document.getElementById('panelSubtitle').textContent = data.students.length + ' طالب | توقيت: ' + data.time;
+      attendance = {}; /* names may have changed; avoid stale keyed map */
+      renderStudents();
+      updateStats();
+      return true;
+    } catch (_) {
+      document.getElementById('studentsList').innerHTML =
+        '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>خطأ في تحديث البيانات</h3></div>';
+      return false;
+    }
+  }
 
-function setStatus(idx, status) {
-  const name = currentStudents[idx];
-  attendance[name] = attendance[name] === status ? '' : status;
-  const row = document.getElementById('row-' + idx);
-  const s = attendance[name];
-  row.className = 'student-row' + (s==='حاضر'?' status-present':s==='غائب'?' status-absent':s==='متاخر'?' status-late':'');
-  const btns = row.querySelectorAll('.status-btn');
-  btns[0].className = 'status-btn ' + (s==='حاضر'?'active-present':'');
-  btns[1].className = 'status-btn ' + (s==='غائب'?'active-absent':'');
-  btns[2].className = 'status-btn ' + (s==='متاخر'?'active-late':'');
-  updateStats();
-}
+  /** Refresh counts on group tiles then restore active card + roster. */
+  async function refreshAfterStudentImport() {
+    await loadGroups();
+    if (!currentGroup) return;
+    const card = document.getElementById('gc-' + currentGroup);
+    if (card) card.classList.add('active');
+    await reloadStudentsForCurrentGroup();
+  }
 
-function markAll(status) {
-  currentStudents.forEach(n => { attendance[n] = status; });
-  renderStudents(); updateStats();
-}
+  async function selectGroup(groupId, el) {
+    document.querySelectorAll('.group-card').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    currentGroup = groupId;
+    attendance = {};
+    const panel = document.getElementById('attendancePanel');
+    panel.classList.add('visible');
+    document.getElementById('studentsList').innerHTML = '<div class="loading"><div class="spinner"></div><br>جاري التحميل...</div>';
+    try {
+      const data = await fetchStudentsPayload(groupId);
+      currentStudents = data.students;
+      document.getElementById('panelTitle').textContent = data.label;
+      document.getElementById('panelSubtitle').textContent = data.students.length + ' طالب | توقيت: ' + data.time;
+      renderStudents();
+      updateStats();
+      panel.scrollIntoView({behavior:'smooth', block:'start'});
+    } catch(e) {
+      document.getElementById('studentsList').innerHTML =
+        `<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>${(e.message || '').replace(/</g,'')}</h3></div>`;
+    }
+  }
 
-function updateStats() {
-  const p = currentStudents.filter(n => attendance[n]==='حاضر').length;
-  const a = currentStudents.filter(n => attendance[n]==='غائب').length;
-  const l = currentStudents.filter(n => attendance[n]==='متاخر').length;
-  const u = currentStudents.filter(n => !attendance[n]).length;
-  document.getElementById('statsBar').innerHTML = `
-    <div class="stat-pill"><div class="stat-dot dot-present"></div> حاضر: <strong>${p}</strong></div>
-    <div class="stat-pill"><div class="stat-dot dot-absent"></div> غائب: <strong>${a}</strong></div>
-    <div class="stat-pill"><div class="stat-dot dot-late"></div> متأخر: <strong>${l}</strong></div>
-    <div class="stat-pill"><div class="stat-dot dot-unmarked"></div> لم يسجل: <strong>${u}</strong></div>`;
-}
+  function renderStudents() {
+    document.getElementById('studentsList').innerHTML = currentStudents.map((name, i) => {
+      const s = attendance[name] || '';
+      const rc = s === 'حاضر' ? 'status-present' : s === 'غائب' ? 'status-absent' : s === 'متاخر' ? 'status-late' : '';
+      return `<div class="student-row ${rc}" id="row-${i}">
+        <div class="student-left"><div class="student-num">${i+1}</div><div class="student-name">${name}</div></div>
+        <div class="status-buttons">
+          <button class="status-btn ${s==='حاضر'?'active-present':''}" onclick="setStatus(${i},'حاضر')">✅ حاضر</button>
+          <button class="status-btn ${s==='غائب'?'active-absent':''}" onclick="setStatus(${i},'غائب')">❌ غائب</button>
+          <button class="status-btn ${s==='متاخر'?'active-late':''}" onclick="setStatus(${i},'متاخر')">⏰ متأخر</button>
+        </div></div>`;
+    }).join('');
+  }
 
-async function saveAttendance() {
-  if (!currentGroup) return;
-  showBanner('💾 جاري الحفظ...', '');
-  try {
-    const res = await fetch(API + '/attendance', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({group_id: currentGroup, date: document.getElementById('sessionDate').value, records: attendance})
-    });
-    showBanner(res.ok ? '✅ تم الحفظ بنجاح!' : '❌ فشل الحفظ', res.ok ? 'success' : 'error');
-  } catch(e) { showBanner('❌ خطأ في الاتصال بالخادم', 'error'); }
-}
+  function setStatus(idx, status) {
+    const name = currentStudents[idx];
+    attendance[name] = attendance[name] === status ? '' : status;
+    const row = document.getElementById('row-' + idx);
+    const s = attendance[name];
+    row.className = 'student-row' + (s==='حاضر'?' status-present':s==='غائب'?' status-absent':s==='متاخر'?' status-late':'');
+    const btns = row.querySelectorAll('.status-btn');
+    btns[0].className = 'status-btn ' + (s==='حاضر'?'active-present':'');
+    btns[1].className = 'status-btn ' + (s==='غائب'?'active-absent':'');
+    btns[2].className = 'status-btn ' + (s==='متاخر'?'active-late':'');
+    updateStats();
+  }
 
-async function loadAttendanceForDate() {
-  if (!currentGroup) return;
-  try {
-    const res = await fetch(API + '/attendance/' + currentGroup);
-    const all = await res.json();
-    const d = document.getElementById('sessionDate').value;
-    if (all[d]) { attendance = all[d]; renderStudents(); updateStats(); showBanner('📂 تم تحميل الجلسة', 'success'); }
-    else showBanner('⚠️ لا توجد بيانات لهذا التاريخ', '');
-  } catch(e) { showBanner('❌ خطأ في الاتصال', 'error'); }
-}
+  function markAll(status) {
+    currentStudents.forEach(n => { attendance[n] = status; });
+    renderStudents(); updateStats();
+  }
 
-function downloadSampleXlsx() {
-  showBanner('⬇️ جاري تنزيل النموذج...', '');
-  const a = document.createElement('a');
-  a.href = API + '/sample-attendance-xlsx';
-  a.target = '_blank';
-  a.rel = 'noopener';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(() => showBanner('✅ تم فتح التنزيل', 'success'), 600);
-}
+  function updateStats() {
+    const p = currentStudents.filter(n => attendance[n]==='حاضر').length;
+    const a = currentStudents.filter(n => attendance[n]==='غائب').length;
+    const l = currentStudents.filter(n => attendance[n]==='متاخر').length;
+    const u = currentStudents.filter(n => !attendance[n]).length;
+    document.getElementById('statsBar').innerHTML = `
+      <div class="stat-pill"><div class="stat-dot dot-present"></div> حاضر: <strong>${p}</strong></div>
+      <div class="stat-pill"><div class="stat-dot dot-absent"></div> غائب: <strong>${a}</strong></div>
+      <div class="stat-pill"><div class="stat-dot dot-late"></div> متأخر: <strong>${l}</strong></div>
+      <div class="stat-pill"><div class="stat-dot dot-unmarked"></div> لم يسجل: <strong>${u}</strong></div>`;
+  }
 
-function exportExcel() {
-  if (!currentGroup) return;
-  showBanner('⬇️ جاري التصدير...', '');
-  const a = document.createElement('a');
-  a.href = API + '/export/' + currentGroup;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(() => showBanner('✅ تم تصدير الملف!', 'success'), 800);
-}
+  async function saveAttendance() {
+    if (!currentGroup) return;
+    showBanner('💾 جاري الحفظ...', '');
+    try {
+      const res = await fetch(API + '/attendance', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({group_id: currentGroup, date: document.getElementById('sessionDate').value, records: attendance})
+      });
+      showBanner(res.ok ? '✅ تم الحفظ بنجاح!' : '❌ فشل الحفظ', res.ok ? 'success' : 'error');
+    } catch(e) { showBanner('❌ خطأ في الاتصال بالخادم', 'error'); }
+  }
 
-function showBanner(text, type) {
-  const b = document.getElementById('saveBanner');
-  b.className = 'save-banner ' + type;
-  document.getElementById('bannerText').textContent = text;
-  b.classList.add('show');
-  clearTimeout(b._t);
-  b._t = setTimeout(() => b.classList.remove('show'), 3000);
-}
+  async function loadAttendanceForDate() {
+    if (!currentGroup) return;
+    try {
+      const res = await fetch(API + '/attendance/' + currentGroup);
+      const all = await res.json();
+      const d = document.getElementById('sessionDate').value;
+      if (all[d]) { attendance = all[d]; renderStudents(); updateStats(); showBanner('📂 تم تحميل الجلسة', 'success'); }
+      else showBanner('⚠️ لا توجد بيانات لهذا التاريخ', '');
+    } catch(e) { showBanner('❌ خطأ في الاتصال', 'error'); }
+  }
 
-bootApp();
+  function downloadSampleXlsx() {
+    showBanner('⬇️ جاري تنزيل النموذج...', '');
+    const a = document.createElement('a');
+    a.href = API + '/sample-attendance-xlsx';
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => showBanner('✅ تم فتح التنزيل', 'success'), 600);
+  }
+
+  function exportExcel() {
+    if (!currentGroup) return;
+    showBanner('⬇️ جاري التصدير...', '');
+    const a = document.createElement('a');
+    a.href = API + '/export/' + encodeURIComponent(currentGroup);
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => showBanner('✅ تم تصدير الملف!', 'success'), 800);
+  }
+
+  /** GET /api/template/<group_id> — RTL workbook with roster prefilled */
+  function downloadStudentTemplate() {
+    if (!currentGroup) return;
+    showBanner('⬇️ جاري تنزيل القالب...', '');
+    const a = document.createElement('a');
+    a.href = API + '/template/' + encodeURIComponent(currentGroup);
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => showBanner('✅ تم تنزيل قالب الطلاب', 'success'), 600);
+  }
+
+  function pickStudentExcel() {
+    if (!currentGroup) {
+      showBanner('⚠️ اختر مجموعة أولاً', '');
+      return;
+    }
+    const inp = document.getElementById('excelStudentsFile');
+    if (!inp) return;
+    inp.value = '';
+    inp.click();
+  }
+
+  /** POST multipart to /api/import-students/<group_id> — JSON success/errors + UI refresh */
+  async function handleStudentExcel(fileList) {
+    const f = fileList && fileList[0];
+    if (!f || !currentGroup) return;
+    const nameLc = (f.name || '').toLowerCase();
+    if (!nameLc.endsWith('.xlsx')) {
+      showBanner('❌ يُقبل امتداد .xlsx فقط', 'error');
+      return;
+    }
+    showBanner('📤 جاري رفع القائمة والتحقق منها...', '');
+    try {
+      const fd = new FormData();
+      fd.append('file', f, f.name);
+      const res = await fetch(API + '/import-students/' + encodeURIComponent(currentGroup), {
+        method: 'POST',
+        body: fd
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = j.message || j.error || ('HTTP ' + res.status);
+        showBanner('❌ ' + msg, 'error');
+        return;
+      }
+      if (j.success) {
+        const n = typeof j.imported_count === 'number' ? j.imported_count : '';
+        showBanner('✅ تم تحديث أسماء الطلاب بنجاح' + (n !== '' ? ' (' + n + ' اسم)' : '') + '!', 'success');
+        await refreshAfterStudentImport();
+      } else {
+        showBanner('❌ ' + (j.message || 'فشل الاستيراد'), 'error');
+      }
+    } catch (_) {
+      showBanner('❌ تعذّر الاتصال بالخادم أثناء الرفع', 'error');
+    }
+  }
+
+  function showBanner(text, type) {
+    const b = document.getElementById('saveBanner');
+    b.className = 'save-banner ' + type;
+    document.getElementById('bannerText').textContent = text;
+    b.classList.add('show');
+    clearTimeout(b._t);
+    b._t = setTimeout(() => b.classList.remove('show'), 3000);
+  }
+
+  bootApp();
 </script>
 </body>
 </html>
