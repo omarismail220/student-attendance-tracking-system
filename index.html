@@ -110,6 +110,16 @@
   .btn-upload { background: linear-gradient(135deg, #0d9488, #14b8a6); color: white; border: none; }
   .btn-upload:hover { box-shadow: 0 4px 16px rgba(20,184,166,0.45); }
   .btn-sm { padding: 6px 14px; font-size: 12px; }
+  .btn-export-range { background: linear-gradient(135deg, #4338ca, #6366f1); color: white; }
+  .btn-export-range:hover { box-shadow: 0 4px 16px rgba(99,102,241,0.45); }
+  .btn-export-month { background: linear-gradient(135deg, #b45309, #f59e0b); color: white; }
+  .btn-export-month:hover { box-shadow: 0 4px 16px rgba(245,158,11,0.45); }
+  .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+  .export-panel { background: var(--card); border-radius: var(--radius); padding: 16px 22px; box-shadow: var(--shadow); margin-bottom: 16px; border: 1px solid var(--border); }
+  .export-panel-title { font-size: 14px; font-weight: 800; color: var(--navy); margin-bottom: 12px; }
+  .export-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .export-row:last-child { margin-bottom: 0; }
+  .export-hint { font-size: 11px; color: var(--muted); width: 100%; margin-top: 4px; }
   .visually-hidden-file { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
   .quick-actions { background: var(--card); border-radius: var(--radius); padding: 16px 22px; box-shadow: var(--shadow); margin-bottom: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -192,9 +202,26 @@
         <button type="button" class="btn btn-outline" onclick="downloadStudentTemplate()" title="تنزيل قالب بتنسيق العربية وحقول جاهزة">📥 تنزيل قالب الطلاب</button>
         <button type="button" class="btn btn-upload" onclick="pickStudentExcel()">📤 رفع قائمة الطلاب (Excel)</button>
         <button type="button" class="btn btn-primary" style="background:#5a6d82" onclick="downloadSampleXlsx()">📄 نموذج Excel</button>
-        <button class="btn btn-export" onclick="exportExcel()">⬇️ تصدير Excel</button>
+        <button type="button" class="btn btn-export" id="btnExportDay" onclick="exportExcel()">⬇️ تصدير يوم (Excel)</button>
         <input type="file" id="excelStudentsFile" class="visually-hidden-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-hidden="true" tabindex="-1" onchange="handleStudentExcel(this.files)">
       </div>
+    </div>
+
+    <div class="export-panel" id="exportPanel">
+      <div class="export-panel-title">📊 تصدير تقارير متقدمة</div>
+      <div class="export-row">
+        <span class="quick-label" style="margin:0;">من:</span>
+        <input type="date" class="date-input" id="exportRangeStart" title="بداية الفترة">
+        <span class="quick-label" style="margin:0;">إلى:</span>
+        <input type="date" class="date-input" id="exportRangeEnd" title="نهاية الفترة">
+        <button type="button" class="btn btn-export-range" id="btnExportRange" onclick="exportAttendanceRange()">⬇️ تصدير فترة</button>
+      </div>
+      <div class="export-row">
+        <span class="quick-label" style="margin:0;">شهر:</span>
+        <input type="month" class="date-input" id="exportMonth" title="الشهر المطلوب">
+        <button type="button" class="btn btn-export-month" id="btnExportMonth" onclick="exportAttendanceMonth()">⬇️ تصدير الشهر</button>
+      </div>
+      <p class="export-hint">يتم توليد ملفات Excel بتنسيق RTL مع ملخص الحضور والغياب والتأخر لكل طالب.</p>
     </div>
 
     <div class="quick-actions">
@@ -240,6 +267,16 @@
   const today = new Date();
   document.getElementById('headerDate').textContent = today.toLocaleDateString('ar-EG', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
   document.getElementById('sessionDate').value = today.toISOString().split('T')[0];
+  const em = document.getElementById('exportMonth');
+  if (em) em.value = today.toISOString().slice(0, 7);
+  const rs = document.getElementById('exportRangeStart');
+  const re = document.getElementById('exportRangeEnd');
+  if (rs && re) {
+    const wk = new Date(today);
+    wk.setDate(today.getDate() - 6);
+    rs.value = wk.toISOString().split('T')[0];
+    re.value = today.toISOString().split('T')[0];
+  }
 
   async function fetchApiInfo() {
     const res = await fetch(API + '/info');
@@ -434,12 +471,21 @@
   async function loadAttendanceForDate() {
     if (!currentGroup) return;
     try {
-      const res = await fetch(API + '/attendance/' + currentGroup);
-      const all = await res.json();
       const d = document.getElementById('sessionDate').value;
-      if (all[d]) { attendance = all[d]; renderStudents(); updateStats(); showBanner('📂 تم تحميل الجلسة', 'success'); }
-      else showBanner('⚠️ لا توجد بيانات لهذا التاريخ', '');
-    } catch(e) { showBanner('❌ خطأ في الاتصال', 'error'); }
+      const q = '?start=' + encodeURIComponent(d) + '&end=' + encodeURIComponent(d);
+      const res = await fetch(API + '/attendance/' + encodeURIComponent(currentGroup) + q);
+      const all = await res.json();
+      if (all[d]) {
+        attendance = all[d];
+        renderStudents();
+        updateStats();
+        showBanner('📂 تم تحميل الجلسة', 'success');
+      } else {
+        showBanner('⚠️ لا توجد بيانات لهذا التاريخ', '');
+      }
+    } catch (e) {
+      showBanner('❌ خطأ في الاتصال', 'error');
+    }
   }
 
   function downloadSampleXlsx() {
@@ -452,13 +498,83 @@
     setTimeout(() => showBanner('✅ تم فتح التنزيل', 'success'), 600);
   }
 
-  function exportExcel() {
+  async function downloadExportBlob(relPath, errCtx) {
+    const ids = ['btnExportDay', 'btnExportRange', 'btnExportMonth'];
+    ids.forEach(id => { const el = document.getElementById(id); if (el) el.disabled = true; });
+    try {
+      showBanner('⬇️ جاري تجهيز الملف...', '');
+      const res = await fetch(API + relPath);
+      if (!res.ok) {
+        let msg = errCtx || 'فشل التصدير';
+        try {
+          const j = await res.json();
+          if (j.message) msg = j.message;
+        } catch (_) { /* not JSON */ }
+        showBanner('❌ ' + msg, 'error');
+        return;
+      }
+      const cd = res.headers.get('Content-Disposition');
+      let fname = 'export.xlsx';
+      if (cd && cd.includes('filename=')) {
+        const m = /filename\*?=(?:UTF-8''|)([^;]+)/i.exec(cd);
+        if (m && m[1]) fname = decodeURIComponent(m[1].trim().replace(/['"]/g, ''));
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showBanner('✅ تم التنزيل', 'success');
+    } catch (_) {
+      showBanner('❌ تعذّر التحميل', 'error');
+    } finally {
+      ids.forEach(id => { const el = document.getElementById(id); if (el) el.disabled = false; });
+    }
+  }
+
+  async function exportExcel() {
     if (!currentGroup) return;
-    showBanner('⬇️ جاري التصدير...', '');
-    const a = document.createElement('a');
-    a.href = API + '/export/' + encodeURIComponent(currentGroup);
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => showBanner('✅ تم تصدير الملف!', 'success'), 800);
+    const d = document.getElementById('sessionDate').value;
+    await downloadExportBlob(
+      '/export/' + encodeURIComponent(currentGroup) + '?date=' + encodeURIComponent(d),
+      'تصدير اليوم'
+    );
+  }
+
+  async function exportAttendanceRange() {
+    if (!currentGroup) return;
+    const s = document.getElementById('exportRangeStart').value;
+    const e = document.getElementById('exportRangeEnd').value;
+    if (!s || !e) {
+      showBanner('⚠️ اختر تاريخ البداية والنهاية', '');
+      return;
+    }
+    await downloadExportBlob(
+      '/export-range/' + encodeURIComponent(currentGroup) +
+        '?start=' + encodeURIComponent(s) + '&end=' + encodeURIComponent(e),
+      'تصدير الفترة'
+    );
+  }
+
+  async function exportAttendanceMonth() {
+    if (!currentGroup) return;
+    const ym = document.getElementById('exportMonth').value;
+    if (!ym || ym.length < 7) {
+      showBanner('⚠️ اختر الشهر', '');
+      return;
+    }
+    const parts = ym.split('-');
+    const y = parts[0];
+    const m = parts[1];
+    await downloadExportBlob(
+      '/export-month/' + encodeURIComponent(currentGroup) +
+        '?year=' + encodeURIComponent(y) + '&month=' + encodeURIComponent(m),
+      'تصدير الشهر'
+    );
   }
 
   /** GET /api/template/<group_id> — RTL workbook with roster prefilled */
